@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Браузерная Игра</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+      color: white;
+    }
+
+    canvas {
+      display: block;
+      background: #333;
+      margin: 0 auto;
+    }
+
+    .overlay {
+      position: absolute;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.9);
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 10;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    button {
+      display: inline-block;
+      margin: 4px;
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+
+    .slot-container {
+      margin-bottom: 10px;
+    }
+
+    .slot-info {
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    .delete-button {
+      background: #800;
+      color: white;
+      border: none;
+      margin-left: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<div id="mainMenu" class="overlay hidden">
+  <h1>Главное меню</h1>
+  <button onclick="Menu.newGame()">Новая игра</button>
+  <button onclick="Menu.showLoadMenu()">Загрузить игру</button>
+  <button onclick="Menu.exportAll()">Экспорт всех</button>
+  <input type="file" accept=".json" onchange="Menu.importAll(event)">
+  <button onclick="Menu.openSettings()">Настройки</button>
+</div>
+
+<div id="loadMenu" class="overlay hidden">
+  <h2>Загрузить игру</h2>
+  <div id="loadSlots"></div>
+  <button onclick="Menu.back()">Назад</button>
+</div>
+
+<div id="inGameMenu" class="overlay hidden">
+  <h2>Пауза</h2>
+  <button onclick="Menu.resume()">Продолжить</button>
+  <button onclick="Menu.showSaveMenu()">Сохранить игру</button>
+  <button onclick="Menu.showLoadMenu(true)">Загрузить игру</button>
+  <button onclick="Menu.showMainMenu()">Выйти в главное меню</button>
+</div>
+
+<div id="saveMenu" class="overlay hidden">
+  <h2>Сохранить игру</h2>
+  <div id="saveSlots"></div>
+  <button onclick="Menu.showInGameMenu()">Назад</button>
+</div>
+
+<script>
+const Storage = {
+  prefix: "save_slot_",
+  slots: 10,
+
+  saveTo(slot, state) {
+    const data = {
+      state,
+      timestamp: new Date().toISOString()
+    };
+    localStorage.setItem(this.prefix + slot, JSON.stringify(data));
+  },
+
+  loadFrom(slot) {
+    const raw = localStorage.getItem(this.prefix + slot);
+    return raw ? JSON.parse(raw) : null;
+  },
+
+  delete(slot) {
+    localStorage.removeItem(this.prefix + slot);
+  },
+
+  hasAnySave() {
+    for (let i = 1; i <= this.slots; i++) {
+      if (localStorage.getItem(this.prefix + i)) return true;
+    }
+    return false;
+  },
+
+  exportAll() {
+    const all = {};
+    for (let i = 1; i <= this.slots; i++) {
+      const entry = this.loadFrom(i);
+      if (entry) all["slot" + i] = entry;
+    }
+    return all;
+  },
+
+  importAll(data) {
+    for (let key in data) {
+      const match = key.match(/^slot(\d+)$/);
+      if (match) {
+        const slot = parseInt(match[1]);
+        if (slot >= 1 && slot <= this.slots) {
+          localStorage.setItem(this.prefix + slot, JSON.stringify(data[key]));
+        }
+      }
+    }
+  }
+};
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let gameState = null;
+let keys = {};
+let running = false;
+
+function gameLoop() {
+  if (!running) return;
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function update() {
+  if (keys["ArrowLeft"]) gameState.x -= 2;
+  if (keys["ArrowRight"]) gameState.x += 2;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.beginPath();
+  ctx.arc(gameState.x, gameState.y, 10, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && gameState) {
+    running = false;
+    Menu.showInGameMenu();
+  }
+  keys[e.key] = true;
+});
+document.addEventListener("keyup", e => keys[e.key] = false);
+
+function startGame(state = null) {
+  gameState = state || { x: 400, y: 300 };
+  running = true;
+  Menu.hideAll();
+  requestAnimationFrame(gameLoop);
+}
+
+window.Game = {
+  startGame,
+  getState: () => gameState
+};
+
+const Menu = {
+  main: document.getElementById("mainMenu"),
+  load: document.getElementById("loadMenu"),
+  save: document.getElementById("saveMenu"),
+  inGame: document.getElementById("inGameMenu"),
+  loadSlots: document.getElementById("loadSlots"),
+  saveSlots: document.getElementById("saveSlots"),
+  fromGame: false,
+
+  hideAll() {
+    this.main.classList.add("hidden");
+    this.load.classList.add("hidden");
+    this.save.classList.add("hidden");
+    this.inGame.classList.add("hidden");
+  },
+
+  showMainMenu() {
+    running = false;
+    this.hideAll();
+    this.main.classList.remove("hidden");
+  },
+
+  showLoadMenu(fromGame = false) {
+    this.fromGame = fromGame;
+    this.hideAll();
+    this.load.classList.remove("hidden");
+    this.loadSlots.innerHTML = "";
+    for (let i = 1; i <= Storage.slots; i++) {
+      const entry = Storage.loadFrom(i);
+      if (entry) {
+        const container = document.createElement("div");
+        container.className = "slot-container";
+
+        const btn = document.createElement("button");
+        btn.textContent = `Слот ${i}`;
+        btn.onclick = () => Game.startGame(entry.state);
+
+        const del = document.createElement("button");
+        del.className = "delete-button";
+        del.textContent = "🗑";
+        del.onclick = () => {
+          if (confirm(`Удалить слот ${i}?`)) {
+            Storage.delete(i);
+            this.showLoadMenu(this.fromGame);
+          }
+        };
+
+        const info = document.createElement("div");
+        info.className = "slot-info";
+        const time = new Date(entry.timestamp).toLocaleString();
+        info.textContent = entry.state
+        ? `⏱ ${time}, X=${entry.state.x}`
+        : `⏱ ${time}, ⚠ повреждённое сохранение`;
+
+        container.appendChild(btn);
+        container.appendChild(del);
+        container.appendChild(info);
+        this.loadSlots.appendChild(container);
+      }
+    }
+    if (!this.loadSlots.children.length) {
+      const msg = document.createElement("p");
+      msg.textContent = "Нет сохранений.";
+      this.loadSlots.appendChild(msg);
+    }
+  },
+
+  showSaveMenu() {
+    this.hideAll();
+    this.save.classList.remove("hidden");
+    this.saveSlots.innerHTML = "";
+    for (let i = 1; i <= Storage.slots; i++) {
+      const container = document.createElement("div");
+      container.className = "slot-container";
+
+      const btn = document.createElement("button");
+      btn.textContent = `Слот ${i}`;
+      btn.onclick = () => {
+        Storage.saveTo(i, Game.getState());
+        alert(`Сохранено в слот ${i}`);
+        this.showInGameMenu();
+      };
+
+      const entry = Storage.loadFrom(i);
+      if (entry) {
+        const del = document.createElement("button");
+        del.className = "delete-button";
+        del.textContent = "🗑";
+        del.onclick = () => {
+          if (confirm(`Удалить слот ${i}?`)) {
+            Storage.delete(i);
+            this.showSaveMenu();
+          }
+        };
+
+        const info = document.createElement("div");
+        info.className = "slot-info";
+        const time = new Date(entry.timestamp).toLocaleString();
+        info.textContent = entry.state
+        ? `⏱ ${time}, X=${entry.state.x}`
+        : `⏱ ${time}, ⚠ повреждённое сохранение`;
+
+        container.appendChild(btn);
+        container.appendChild(del);
+        container.appendChild(info);
+      } else {
+        container.appendChild(btn);
+      }
+      this.saveSlots.appendChild(container);
+    }
+  },
+
+  newGame() {
+    Game.startGame();
+  },
+
+  resume() {
+    running = true;
+    this.hideAll();
+    requestAnimationFrame(gameLoop);
+  },
+
+  showInGameMenu() {
+    this.hideAll();
+    this.inGame.classList.remove("hidden");
+  },
+
+  back() {
+    if (this.fromGame) this.showInGameMenu();
+    else this.showMainMenu();
+  },
+
+  exportAll() {
+    const blob = new Blob([JSON.stringify(Storage.exportAll())], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "saves.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  importAll(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        Storage.importAll(data);
+        alert("Импорт завершён.");
+      } catch {
+        alert("Ошибка импорта.");
+      }
+    };
+    reader.readAsText(file);
+  },
+
+  openSettings() {
+    alert("Настройки пока недоступны.");
+  }
+};
+
+window.addEventListener("load", () => {
+  Menu.showMainMenu();
+});
+</script>
+</body>
+</html>
